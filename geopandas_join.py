@@ -6,39 +6,22 @@ With QGIS : 32202
 """
 
 
- 
-
-import os
-import glob
+import geopandas as gpd
+import pandas as pd
+import glob, os
+from shapely.geometry import Point, Polygon
+from shapely.geometry import shape
+from shapely import geometry
 import shutil
 
-import sys
-
-
-
-import pandas as pd
-import ipdb
-
-
-
-
-from osgeo import gdal
-from osgeo import ogr
-from osgeo import osr
-
-
 import multiprocessing
-import subprocess
-
-
-
 
 
 print('---------------------------')
 
 #input path to tree crown polygons folder
 inPath = '/dbfs/mnt/treecrownclips/'
-noforest = gpd.read_file"/dbfs/mnt/strukturparametre/non-forrest.shp"
+noforest = gpd.read_file"/dbfs/mnt/strukturparametre/Non_forest_eraser.gpkg"
 gdf_nofor = gpd.GeoDataFrame(noforest, crs="EPSG:25832")
 
 #read paths to trees
@@ -57,36 +40,8 @@ def delineation_process():
 
     print(filep)
 
-# creating directories for each clip's intermediate processing files according to filename, needed to distinguish the first buffer chunks so they can be merged by clip and then deleted by clip.
 
-    #tree crowns chunks selection directory
-    directorysel = f"{filen}_sel" 
-    #1st buffered chunks
-    directorych = f'{filen}_chunks'
-    #rest of temporary intermediate files
-    directorytmp = f'{filen}_temp'
     
-# Parent Directory path
-    parent_dir = "/dbfs/mnt/temp/"
-
-# Paths
-    pathsel = os.path.join(parent_dir, directorysel)
-    pathch = os.path.join(parent_dir, directorych)
-    pathtmp = os.path.join(parent_dir, directorytmp)
-
-# Create the directory
-#
-# '/home / User / Documents'
-    os.mkdir(pathsel)
-    os.mkdir(pathch)
-    os.mkdir(pathtmp)
-
-
-
-
-
-    results = {}
-    outputs = {}
     
     treecrowns = gpd.read_file(f{'filep'})
     gdf_trees = gpd.GeoDataFrame(treecrowns, crs="EPSG:25832")
@@ -169,15 +124,22 @@ def delineation_process():
         
         #extract by attribute
             
-        outputs['Selection'] = gdf_trees[gdf_trees['grid_id'] == f'{i}]
+        chunk = gpd.GeoDataFrame(trees_id[trees_id['grid_id'] == i])
 
         #buffer out 10 m
         
-        outputs[f'buffer_{i}'] = outputs['Selection'].buffer(10,resolution=2 )
+        buffered = chunk.to_crs(25832).buffer(10)
+        
+        buffered= gpd.GeoDataFrame(gpd.GeoSeries(buffered))
+         
+        buffered=  buffered.rename(columns={0:'geometry'}).set_geometry('geometry')
+        
+        buffered = gpd.geoseries.GeoSeries([geom for geom in buffered.unary_union.geoms])
 
-            print(i,filen)
+        buffered =  buffered.set_crs('epsg:25832')
+        print(i)
 
-        list_chunks.append(outputs[f'{filen}_buffer_{1}'])
+        list_chunks.append(buffered)
         
         #ipdb.set_trace()
 
@@ -194,243 +156,93 @@ def delineation_process():
     for iprocess in iprocesses:
         iprocess.join()    
     
-    #subrpocess to OGR merge chunks
-
-    #wd = os.getcwd()
-    #os.chdir(f"/home/martin/Michail/Temp/{filen}_chunks/")
-    #subprocess.run(["ogrmerge.py", "-single", "-f", "GPKG", "-o", f"/home/martin/Michail/Temp/{filen}_temp/merged_chunks.gpkg", "*.gpkg"])
-    #os.chdir(wd)
-                                         
     
+    merge = pd.concat(list_chunks)
     
-
-    print('merge chunks')
-
-
-
-    #Fix_geometries
-
-
-
-
-
-
-    # Buffer_20_in_1
-    buffer_in_20_1 = fix_union_utm.buffer(-20,resolution=2 )
-        
-
+    merged_gdf = gpd.GeoDataFrame(gpd.GeoSeries(merge))
+    
+    merged_gdf = merged_gdf.rename(columns={0:'geometry'}).set_geometry('geometry')
+    
+    bfr_in_20_1 = merged_gdf.to_crs(25832).buffer(-20)
+    
 
     print('buffer_20_in_1',filen)
 
 
     # Multipart to singleparts
-    alg_params = {
-        'INPUT': outputs['Buffer_10_in_1']['OUTPUT'],
-        'OUTPUT': f'/home/martin/Michail/Temp/{filen}_temp/sngl_in_20_1.gpkg'
-        
-    }
-    outputs['MultipartToSingleparts'] = processing.run('native:multiparttosingleparts', alg_params,  is_child_algorithm=True)
+    single_bfr_in_1 = bfr_in_20_1.explode(index_parts=True)
 
 
     # Buffer
-    alg_params = {
-        'DISSOLVE': True,
-        'DISTANCE': 20,
-        'END_CAP_STYLE': 0,  # Round
-        'INPUT': outputs['MultipartToSingleparts']['OUTPUT'],
-        'JOIN_STYLE': 0,  # Round
-        'MITER_LIMIT': 2,
-        'OUTPUT': f'/home/martin/Michail/Temp/{filen}_temp/bfr_20_out_1.gpkg',
-        'SEGMENTS': 5,
-        
-    }
-    outputs['Buffer'] = processing.run('native:buffer', alg_params,  is_child_algorithm=True)
-
-
+    bfr_out_20_2 = single_bfr_in_1.to_crs(25832).buffer(20)
+    
+    un_2 = gpd.geoseries.GeoSeries([geom for geom in bfr_out_20_2.unary_union.geoms])
+    
     # Single_out_20
-    alg_params = {
-        'INPUT': outputs['Buffer']['OUTPUT'],
-        'OUTPUT': f'/home/martin/Michail/Temp/{filen}_temp/sngl_2_bfr_out_1.gpkg'
-        
-    }
-    outputs['Single_out_20'] = processing.run('native:multiparttosingleparts', alg_params,  is_child_algorithm=True)
-
-
+    un_2_single = un_2.explode(index_parts=True)
+    
+    un_2_single = un_2_single.set_crs(25832)
     # Buffer_in_10_2
-    alg_params = {
-        'DISSOLVE': True,
-        'DISTANCE': -10,
-        'END_CAP_STYLE': 0,  # Round
-        'INPUT': outputs['Single_out_20']['OUTPUT'],
-        'JOIN_STYLE': 0,  # Round
-        'MITER_LIMIT': 2,
-        'OUTPUT': f'/home/martin/Michail/Temp/{filen}_temp/bfr_in_10_2.gpkg',
-        'SEGMENTS': 5,
-        
-    }
-    outputs['Buffer_in_10_2'] = processing.run('native:buffer', alg_params,   is_child_algorithm=True)
+    bfr_in_10_2 = un_2_single.to_crs(25832).buffer(-10)
+    
+    #single in 10 2
 
+    single_bfr_in_2 = bfr_in_10_2.explode(index_parts=True)
 
-    # # Single_in_10_2
-    alg_params = {
-        'INPUT': f'/home/martin/Michail/Temp/{filen}_temp/bfr_in_10_2.gpkg',
-        'OUTPUT': f'/home/martin/Michail/Temp/{filen}_sngl_in_10_2.gpkg'
-        
-    }
-    outputs['Single_in_10_2'] = processing.run('native:multiparttosingleparts', alg_params,   is_child_algorithm=True)
+    single_bfr_in_2 = single_bfr_in_2.set_crs(25832)
+    
+    #Buffer out 10 3
+    
+    bfr_out_10_3 = single_bfr_in_2.to_crs(25832).buffer(10)
+    
+    un_3 = gpd.geoseries.GeoSeries([geom for geom in bfr_out_10_3.unary_union.geoms])
 
-
-
-    # Buffer_out_10_2
-    alg_params = {
-        'DISSOLVE': True,
-        'DISTANCE': 10,
-        'END_CAP_STYLE': 0,  # Round
-        'INPUT': outputs['Single_in_10_2']['OUTPUT'],
-        'JOIN_STYLE': 0,  # Round
-        'MITER_LIMIT': 2,
-        'OUTPUT': f'/home/martin/Michail/Temp/{filen}_temp/bfr_out_3_10.gpkg',
-        'SEGMENTS': 5,
-        
-    }
-    outputs['Buffer_out_10_2'] = processing.run('native:buffer', alg_params,   is_child_algorithm=True)
-
-
-
-    # Single_buff_out_10_2
-    alg_params = {
-        'INPUT': outputs['Buffer_out_10_2']['OUTPUT'],
-        'OUTPUT': f'/home/martin/Michail/Temp/{filen}_temp/sngl_bfr_out_10_2.gpkg'
-        
-    }
-    outputs['Single_buff_out_10_2'] = processing.run('native:multiparttosingleparts', alg_params,   is_child_algorithm=True)
-
-
+    single_un_3 = un_3.explode(index_parts=True)
+    
+    single_un_3 = single_un_3.set_crs(25832)
 
     # Buffer_in_10_3
-    alg_params = {
-        'DISSOLVE': True,
-        'DISTANCE': -10,
-        'END_CAP_STYLE': 0,  # Round
-        'INPUT': outputs['Single_buff_out_10_2']['OUTPUT'],
-        'JOIN_STYLE': 0,  # Round
-        'MITER_LIMIT': 2,
-        'OUTPUT': f'/home/martin/Michail/Temp/{filen}_temp/bfr_in_10_3.gpkg',
-        'SEGMENTS': 5,
-        
-    }
-    outputs['Buffer_in_10_3'] = processing.run('native:buffer', alg_params,   is_child_algorithm=True)
 
-
-    
+    bfr_in_10_3 = single_un_3.to_crs(25832).buffer(-10)
     # Single_buff_in_10_3
-    alg_params = {
-        'INPUT': outputs['Buffer_in_10_3']['OUTPUT'],
-        'OUTPUT': f'/home/martin/Michail/Temp/{filen}_temp/sngl_bfr_in_10_3.gpkg'
-        
-    }
-    outputs['Single_buff_in_10_3'] = processing.run('native:multiparttosingleparts', alg_params,   is_child_algorithm=True)
-
+    single_in_10_3 = bfr_in_10_3.explode(index_parts=True)
+    
+    gdf_in_10_3 = gpd.GeoDataFrame(gpd.GeoSeries(single_in_10_3))
+    
+    gdf_in_10_3 = gdf_in_10_3.rename(columns={0:'geometry'}).set_geometry('geometry')
+    gdf_in_10_3 = gdf_in_10_3.set_crs(25832)
+    
+    
             # Difference_final
-    alg_params = {
-        'INPUT': f'/home/martin/Michail/Temp/{filen}_temp/sngl_bfr_in_10_3.gpkg',
-        'OUTPUT': f'/home/martin/Michail/Temp/{filen}_temp/difference_final.gpkg',
-        'OVERLAY': f'/home/martin/Michail/Temp/{filen}_temp/No_forest_clipped.gpkg'
-        
-    }
-    outputs['Difference_final'] = processing.run('native:difference', alg_params, is_child_algorithm=True)
-
-    #fix geometries
-    alg_params = {
-        'INPUT': outputs['Difference_final']['OUTPUT'],
-        'OUTPUT': f'/home/martin/Michail/Temp/{filen}_temp/fx_gm_fin_dif_gm.gpkg'
-        
-    }
-    outputs['FixGeometries_fin_dif'] = processing.run('native:fixgeometries', alg_params,   is_child_algorithm=True)
-
-
+    dif_final = gdf_in_10_3.overlay(nonfor_clip, how='difference')
+    
     print('difference_final')
 
         # Buffer_in_10_4
-    alg_params = {
-        'DISSOLVE': True,
-        'DISTANCE': -10,
-        'END_CAP_STYLE': 0,  # Round
-        'INPUT': outputs['FixGeometries_fin_dif']['OUTPUT'],
-        'JOIN_STYLE': 0,  # Round
-        'MITER_LIMIT': 2,
-        'OUTPUT': f'/home/martin/Michail/Temp/{filen}_temp/bfr_in_10_4.gpkg',
-        'SEGMENTS': 5,
-        
-    }
-    outputs['Buffer_in_10_4'] = processing.run('native:buffer', alg_params,   is_child_algorithm=True)
-
-        # Single_buff_in_10_4
-    alg_params = {
-        'INPUT': outputs['Buffer_in_10_4']['OUTPUT'],
-        'OUTPUT': f'/home/martin/Michail/Temp/{filen}_temp/sngl_bfr_in_10_4.gpkg'
-        
-    }
-    outputs['Single_buff_in_10_3'] = processing.run('native:multiparttosingleparts', alg_params,   is_child_algorithm=True)
-
+    bfr_in_10_4 = dif_final.to_crs(25832).buffer(-10)
+    single_in_10_4 = bfr_in_10_4.explode(index_parts=True)
+    gdf_in_10_4 = gpd.GeoDataFrame(gpd.GeoSeries(single_in_10_4))
+    gdf_in_10_4 = gdf_in_10_4.rename(columns={0:'geometry'}).set_geometry('geometry')
+    gdf_in_10_4 = gdf_in_10_4.set_crs(25832)
+    
 
     # Buffer_out_10_3
-    alg_params = {
-        'DISSOLVE': True,
-        'DISTANCE': 10,
-        'END_CAP_STYLE': 0,  # Round
-        'INPUT': outputs['Single_buff_in_10_3']['OUTPUT'],
-        'JOIN_STYLE': 0,  # Round
-        'MITER_LIMIT': 2,
-        'OUTPUT': f'/home/martin/Michail/Temp/{filen}_temp/bfr_out_10_3.gpkg',
-        'SEGMENTS': 5,
-        
-    }
-    outputs['Buffer_out_10_3'] = processing.run('native:buffer', alg_params,   is_child_algorithm=True)
-
+    gdf_out_10_4 = gdf_in_10_4.to_crs(25832).buffer(10)
+    un_4 = gpd.geoseries.GeoSeries([geom for geom in gdf_out_10_4.unary_union.geoms])
+    single_out_4 =un_4.explode(index_parts=True)
+    gdf_out_10_4 = gpd.GeoDataFrame(gpd.GeoSeries(single_in_10_4))
+    gdf_out_10_4 = gdf_out_10_4.rename(columns={0:'geometry'}).set_geometry('geometry')
+    gdf_out_10_4 = gdf_out_10_4.set_crs(25832)
             # Single_buff_out_10_3
-    alg_params = {
-        'INPUT': outputs['Buffer_out_10_3']['OUTPUT'],
-        'OUTPUT': f'/home/martin/Michail/Temp/{filen}_temp/sngl_bfr_out_10_3.gpkg'
-        
-    }
-    outputs['Single_buff_out_10_3'] = processing.run('native:multiparttosingleparts', alg_params,   is_child_algorithm=True)
-
-
 
     # Field calculator
-    alg_params = {
-        'FIELD_LENGTH': 10,
-        'FIELD_NAME': 'area_ha',
-        'FIELD_PRECISION': 3,
-        'FIELD_TYPE': 0,  # Float
-        'FORMULA': '$area/10000',
-        'INPUT': outputs['Single_buff_out_10_3']['OUTPUT'],
-        'OUTPUT': f'/home/martin/Michail/Temp/{filen}_temp/area_ha.gpkg',
-        
-    }
-    outputs['FieldCalculator'] = processing.run('native:fieldcalculator', alg_params,   is_child_algorithm=True)
-
-
-
+    gdf_out_10_4['area_ha'] = gdf_out_10_4.area/10000
     # Extract by attribute
-    alg_params = {
-        'FIELD': 'area_ha',
-        'INPUT': outputs['FieldCalculator']['OUTPUT'],
-        'OPERATOR': 3,  # ≥
-        'VALUE': '0.5',
-        'OUTPUT': f'/home/martin/Michail/Results_clips/Final_output_{filen}.gpkg'
-    }
-    outputs['ExtractByAttribute'] = processing.run('native:extractbyattribute', alg_params,   is_child_algorithm=True)
-    results['Delineation001'] = outputs['ExtractByAttribute']['OUTPUT']
+    forest = gdf_out_10_4[gdf_out_10_4['area_ha'] >= 0.5]
     
-    files = f'/home/martin/Michail/Temp/{filen}_temp'
-    chanks = f'/home/martin/Michail/Temp/{filen}_chunks'
-    sels = f'/home/martin/Michail/Temp/{filen}_sel'
-    
-    shutil.rmtree(files)
-    shutil.rmtree(chanks)
-    shutil.rmtree(sels)
+    forest.to_file(f"/tmp/forest_{filen}.gpkg", layer=f'forest_{filen}', driver="GPKG")
+    shutil.move(f"/tmp/forest_{filen}.gpkg", f"/dbfs/mnt/resultblocks/foresr_{filen}.gpkg" )
+
 
 
     et = time.time()
