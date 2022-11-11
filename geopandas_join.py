@@ -9,10 +9,12 @@ With QGIS : 32202
 import geopandas as gpd
 import pandas as pd
 import glob, os
-from shapely.geometry import Point, Polygon
+from shapely.geometry import Point, Polygon, LineString
 from shapely.geometry import shape
 from shapely import geometry
+import numpy as np
 import shutil
+import time
 
 import multiprocessing
 
@@ -21,11 +23,11 @@ print('---------------------------')
 
 #input path to tree crown polygons folder
 inPath = '/dbfs/mnt/treecrownclips/'
-noforest = gpd.read_file"/dbfs/mnt/strukturparametre/Non_forest_eraser.gpkg"
+noforest = gpd.read_file("/dbfs/mnt/strukturparametre/Non_forest_eraser.gpkg")
 gdf_nofor = gpd.GeoDataFrame(noforest, crs="EPSG:25832")
 
 #read paths to trees
-treepaths = glob.glob(f"{inPath}/merged*.gpkg")
+treepaths = glob.glob(f"{inPath}/*.gpkg")
 print(treepaths, 'treepaths')
 
 #Main process
@@ -43,7 +45,7 @@ def delineation_process():
 
     
     
-    treecrowns = gpd.read_file(f{'filep'})
+    treecrowns = gpd.read_file(filep)
     gdf_trees = gpd.GeoDataFrame(treecrowns, crs="EPSG:25832")
     
 #extracting extent for each clip
@@ -257,9 +259,7 @@ def delineation_process():
 fprocesses = []
     
 for filep in treepaths:
-    # layer = QgsVectorLayer(f'/home/martin/Michail/Temp/concave_hull_chunks/Outputs_82_18_conc_hull_{i}.gpkg', f"Outputs_82_18_conc_hull_{i}", "ogr") #when crahes
-    # if not layer.isValid():   
-    #
+
     fprocess = multiprocessing.Process(target=delineation_process, args=())
     fprocess.start()
     fprocesses.append(fprocess)
@@ -267,4 +267,4 @@ for filep in treepaths:
 for fprocess in fprocesses:
     fprocess.join()  
 
-# ipdb.set_trace()
+
