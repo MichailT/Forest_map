@@ -52,17 +52,19 @@ def delineation_process():
     
 #extracting extent for each clip
 
-    extent = treecrowns.total_bounds
+    
 
     #clip non forest layer to extent of current clip
     
-    nonfor_clip = gdf_nonfor.overlay(extent, how='intersection')
+    nonfor_clip = gdf_nofor.overlay(gdf_trees, how='intersection')
 
     #Difference_1 erasing tree crowns by non forest overlay
 
     treesdif = gdf_trees.overlay(nonfor_clip, how='difference')
     
     #Processing grid creation for chunks       
+    
+    total_bounds = treesdif.total_bounds
 
     minX, minY, maxX, maxY = total_bounds
 
@@ -86,7 +88,7 @@ def delineation_process():
     
     gdf_trees =gdf_trees.to_crs(epsg=25832)
     
-    gdf_grid =gdf_grid.to_crs(epsg=25832)
+    gdf_grid =grid.to_crs(epsg=25832)
 
     #extract by location so that processing grid is only where there are tree crown polygons
 
@@ -252,6 +254,7 @@ def delineation_process():
     et = time.time()
     total_time = et - st
     print(total_time, 'elapsed_time')
+    
     
 
 
