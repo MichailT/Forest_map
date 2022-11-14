@@ -22,12 +22,14 @@ import multiprocessing
 print('---------------------------')
 
 #input path to tree crown polygons folder
-inPath = '/dbfs/mnt/treecrownclips/'
-noforest = gpd.read_file("/dbfs/mnt/strukturparametre/Non_forest_eraser.gpkg")
+inPath = "/dbfs/mnt/strukturparametre/test_1/"
+noforest = gpd.read_file("/dbfs/mnt/strukturparametre/eraser_1.gpkg")
 gdf_nofor = gpd.GeoDataFrame(noforest, crs="EPSG:25832")
 
-#read paths to trees
-treepaths = glob.glob(f"{inPath}/*.gpkg")
+
+
+gpkg_pattern = os.path.join(inPath, '*.gpkg')
+treepaths = glob.glob(gpkg_pattern)
 print(treepaths, 'treepaths')
 
 #Main process
@@ -250,14 +252,14 @@ def delineation_process():
     et = time.time()
     total_time = et - st
     print(total_time, 'elapsed_time')
-    return results
+    
 
 
 
 #multiprocessing the delineation process for filepath in polygon clips 
 
 fprocesses = []
-    
+
 for filep in treepaths:
 
     fprocess = multiprocessing.Process(target=delineation_process, args=())
